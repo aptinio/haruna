@@ -411,6 +411,8 @@ void MpvItem::onPropertyChanged(const QString &property, const QVariant &value)
         Q_EMIT durationChanged();
 
     } else if (property == MpvProperties::self()->Pause) {
+        // setPause() has usually recorded this value already.
+        const bool changed = m_pause != value.toBool();
         m_pause = value.toBool();
 
         auto state = m_pause ? PlaybackState::Paused : PlaybackState::Playing;
@@ -424,7 +426,9 @@ void MpvItem::onPropertyChanged(const QString &property, const QVariant &value)
             playlistsManager()->activePlaylist()->setIsPlaying(true);
         }
 
-        Q_EMIT pauseChanged();
+        if (changed) {
+            Q_EMIT pauseChanged();
+        }
 
     } else if (property == MpvProperties::self()->Volume) {
         m_volume = value.toInt();
@@ -981,6 +985,10 @@ void MpvItem::setPause(bool value)
         return;
     }
     setProperty(MpvProperties::self()->Pause, value);
+    // Recorded at once, so that an action right after this one, such as a toggle, reads the
+    // state just requested rather than the one mpv has yet to report back.
+    m_pause = value;
+    Q_EMIT pauseChanged();
 }
 
 int MpvItem::volume()
