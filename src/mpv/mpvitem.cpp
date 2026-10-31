@@ -310,6 +310,30 @@ void MpvItem::onFileLoaded()
     setIsVideo(mimeType.startsWith(u"video/"_s));
     setIsLocalFile(m_currentUrl.isLocalFile());
 
+    // Read before the file counts as loaded, so that it is never shown with the previous
+    // file's answer.
+    bool hasVideoTrack = false;
+    bool hasAudioTrack = false;
+    const auto tracks = getProperty(MpvProperties::self()->TrackList).toList();
+    for (const auto &track : tracks) {
+        const auto map = track.toMap();
+        const auto type = map.value(u"type"_s).toString();
+        if (type == u"video"_s && !map.value(u"albumart"_s).toBool() && !map.value(u"image"_s).toBool()) {
+            hasVideoTrack = true;
+        }
+        if (type == u"audio"_s && !map.value(u"external"_s).toBool()) {
+            hasAudioTrack = true;
+        }
+    }
+    if (m_hasVideoTrack != hasVideoTrack) {
+        m_hasVideoTrack = hasVideoTrack;
+        Q_EMIT hasVideoTrackChanged();
+    }
+    if (m_hasAudioTrack != hasAudioTrack) {
+        m_hasAudioTrack = hasAudioTrack;
+        Q_EMIT hasAudioTrackChanged();
+    }
+
     setFinishedLoading(true);
 }
 
@@ -1237,6 +1261,16 @@ void MpvItem::setIsLocalFile(bool newIsLocalFile)
 bool MpvItem::isVideo() const
 {
     return m_isVideo;
+}
+
+bool MpvItem::hasVideoTrack() const
+{
+    return m_hasVideoTrack;
+}
+
+bool MpvItem::hasAudioTrack() const
+{
+    return m_hasAudioTrack;
 }
 
 void MpvItem::setIsVideo(bool newIsVideo)

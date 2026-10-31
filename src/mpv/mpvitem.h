@@ -179,6 +179,16 @@ public:
     bool isVideo() const;
     void setIsVideo(bool newIsVideo);
 
+    // Whether the file has a video track other than cover art or a still image. isVideo goes
+    // by the MIME type, so it is also true for a video container holding only audio.
+    Q_PROPERTY(bool hasVideoTrack READ hasVideoTrack NOTIFY hasVideoTrackChanged)
+    bool hasVideoTrack() const;
+
+    // Whether the file itself has an audio track, the one its waveform is decoded from.
+    // An external audio file loaded next to it does not count.
+    Q_PROPERTY(bool hasAudioTrack READ hasAudioTrack NOTIFY hasAudioTrackChanged)
+    bool hasAudioTrack() const;
+
     Q_INVOKABLE void loadFile(const QString &file);
     Q_INVOKABLE void userCommand(const QString &commandString);
     Q_INVOKABLE void selectSubtitleTrack();
@@ -224,6 +234,8 @@ Q_SIGNALS:
     void eofPlayNext();
     void isLocalFileChanged();
     void isVideoChanged();
+    void hasVideoTrackChanged();
+    void hasAudioTrackChanged();
 
     // signals used for mpris
     void playNext();
@@ -283,6 +295,8 @@ private:
     PlaylistsManager *m_playlistsManager = nullptr;
     bool m_isLocalFile;
     bool m_isVideo;
+    bool m_hasVideoTrack{false};
+    bool m_hasAudioTrack{false};
     std::unique_ptr<SeekableRangesModel> m_seekableRangesModel;
     QElapsedTimer m_positionChangeTimer;
     std::unique_ptr<QTimer> m_positionReportTimer;
