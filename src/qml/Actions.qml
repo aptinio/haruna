@@ -19,7 +19,7 @@ import org.kde.haruna.settings
 Item {
     id: root
 
-    required property MpvItem m_mpv
+    required property MpvVideo m_mpv
     required property PlaylistsManager playlistsManager
     required property MpvContextMenu m_mpvContextMenuLoader
     required property SettingsWindow m_settingsLoader
@@ -50,6 +50,8 @@ Item {
             shortcut: delegate.actionShortcut
             icon.name: delegate.actionIcon
             onTriggered: {
+                // An action, for example from a shortcut, comes after a pending waveform click.
+                root.m_mpv.applyPendingWaveformClick()
                 if (delegate.actionType === "NormalAction") {
                     Models.actionsModel.signalEmitter(objectName)
                 }

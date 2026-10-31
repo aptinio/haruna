@@ -53,6 +53,172 @@ MpvItem {
     onPlayNext: { HarunaApp.actions.playNextAction.trigger() }
     onPlayPrevious: { HarunaApp.actions.playPreviousAction.trigger() }
 
+    readonly property bool waveformAvailable: waveformView.active
+
+    // MpvItem throttles the reported position, so a seek reaches the playhead only after the
+    // next report. Track the position here and move it on seek.
+    property double waveformPosition: 0
+    readonly property double waveformPlayheadX: xForPosition(waveformPosition)
+
+    // Half a grid unit around the playhead resumes instead of seeking. Pointer scale, not
+    // waveform scale: the pointer stays the same size however wide the waveform is.
+    readonly property double waveformResumeTolerance: Kirigami.Units.gridUnit / 2
+
+    // A quarter of a grid unit, the small spacing scale, is a twitch rather than a drag.
+    readonly property double waveformDragThreshold: Kirigami.Units.gridUnit / 4
+
+    property bool waveformPressed: false
+    property bool waveformDragging: false
+    property double waveformPressX: 0
+    property double waveformPressY: 0
+    property double waveformPressTime: 0
+    // A pending click is resolved on release: the player can change size, or playback pause,
+    // before it is applied.
+    property double waveformPendingPosition: 0
+    property bool waveformPendingResumes: false
+    property bool waveformDoubleClickPossible: false
+
+    // A click is applied after the double click interval, so that a double click reaches its
+    // configured action without first seeking and pausing.
+    Timer {
+        id: waveformClickTimer
+
+        // The platform's double click interval, or KDE's default when the platform reports
+        // none. A shorter wait would handle a double click as two clicks again.
+        interval: Qt.styleHints.mouseDoubleClickInterval > 0 ? Qt.styleHints.mouseDoubleClickInterval : 400
+        repeat: false
+        onTriggered: root.applyWaveformClick()
+    }
+
+    Connections {
+        target: root
+
+        function onPositionChanged() {
+            // A drag moves the playhead itself; a report from an earlier seek of the drag
+            // would pull it back.
+            if (!root.waveformDragging) {
+                root.waveformPosition = root.position
+            }
+        }
+
+        function onCurrentUrlChanged() {
+            root.waveformPosition = 0
+            // A gesture or a pending click belongs to the waveform of the previous file.
+            waveformClickTimer.stop()
+            root.cancelWaveformPress()
+        }
+    }
+
+    function xForPosition(position: double) : double {
+        return root.duration > 0 ? position / root.duration * root.width : 0
+    }
+
+    function positionForX(x: double) : double {
+        return root.duration > 0 && root.width > 0 ? Math.max(0, Math.min(1, x / root.width)) * root.duration : 0
+    }
+
+    function nearPlayhead(x: double) : bool {
+        return Math.abs(x - root.waveformPlayheadX) <= root.waveformResumeTolerance
+    }
+
+    function beginWaveformPress(x: double, y: double) : void {
+        // A click still waiting to be applied here is the first of a double click, whose
+        // configured action replaces it.
+        waveformClickTimer.stop()
+        waveformPressed = true
+        waveformDragging = false
+        waveformPressX = x
+        waveformPressY = y
+        waveformPressTime = Date.now()
+        waveformDoubleClickPossible = true
+    }
+
+    // Qt makes no double click once the pointer has moved this far from the first press,
+    // even if it comes back.
+    function trackWaveformDoubleClickDistance(x: double, y: double) : void {
+        const doubleClickDistance = Qt.styleHints.mouseDoubleClickDistance
+        if (waveformDoubleClickPossible
+                && (Math.abs(x - waveformPressX) > doubleClickDistance || Math.abs(y - waveformPressY) > doubleClickDistance)) {
+            waveformDoubleClickPossible = false
+            applyPendingWaveformClick()
+        }
+    }
+
+    function continueWaveformDrag(x: double, y: double) : void {
+        if (!waveformPressed) {
+            return
+        }
+        if (!waveformDragging
+                && Math.max(Math.abs(x - waveformPressX), Math.abs(y - waveformPressY)) > waveformDragThreshold) {
+            waveformDragging = true
+        }
+        if (waveformDragging) {
+            seekInWaveform(x)
+        }
+    }
+
+    function finishWaveformPress(x: double, modifiers: int) : void {
+        const dragged = waveformDragging
+        cancelWaveformPress()
+        if (dragged) {
+            return
+        }
+        waveformPendingPosition = positionForX(x)
+        waveformPendingResumes = root.pause && nearPlayhead(x)
+        // Released off the player, after moving too far, or with no double click action to wait
+        // for, the click cannot start a double click, and the next press could otherwise take
+        // effect before it.
+        if (!mouseArea.containsMouse || !waveformDoubleClickPossible || !root.hasDoubleClickAction(modifiers)) {
+            applyWaveformClick()
+            return
+        }
+        waveformClickTimer.restart()
+    }
+
+    function cancelWaveformPress() : void {
+        waveformPressed = false
+        waveformDragging = false
+    }
+
+    function hasDoubleClickAction(modifiers: int) : bool {
+        return Models.mouseActionsModel.getAction(Qt.LeftButton, modifiers, true) !== ""
+    }
+
+    // Anything that cannot make a double click with a pending click comes after it, so the
+    // click is applied first and the two take effect in order.
+    function applyPendingWaveformClick() : void {
+        if (waveformClickTimer.running) {
+            waveformClickTimer.stop()
+            applyWaveformClick()
+        }
+    }
+
+    function applyWaveformClick() : void {
+        if (!root.waveformAvailable) {
+            return
+        }
+        // A click on the playhead while paused resumes. Any other click seeks there and
+        // pauses, so pointing at a spot does not start playback.
+        if (root.waveformPendingResumes) {
+            root.pause = false
+            return
+        }
+        seekToWaveformPosition(root.waveformPendingPosition)
+        root.pause = true
+    }
+
+    function seekInWaveform(x: double) : void {
+        if (!root.waveformAvailable || root.duration <= 0 || root.width <= 0) {
+            return
+        }
+        seekToWaveformPosition(root.positionForX(x))
+    }
+
+    function seekToWaveformPosition(target: double) : void {
+        root.waveformPosition = target
+        root.command(["seek", target, "absolute"])
+    }
+
     WaveformView {
         id: waveformView
 
@@ -78,9 +244,7 @@ MpvItem {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: 1
-            x: root.duration > 0
-               ? Math.max(0, Math.min(parent.width - width, Math.round(root.position / root.duration * parent.width)))
-               : 0
+            x: Math.max(0, Math.min(parent.width - width, Math.round(root.waveformPlayheadX)))
             color: Kirigami.Theme.textColor
         }
 
@@ -108,18 +272,76 @@ MpvItem {
 
         property bool hideCursor: false
 
+        function triggerDoubleClickAction(mouse) : void {
+            const model = Models.mouseActionsModel
+            let actionName
+            let modifier = mouse.modifiers
+            if (mouse.button === Qt.LeftButton) {
+                actionName = model.getAction(Qt.LeftButton, modifier, true)
+            } else if (mouse.button === Qt.MiddleButton) {
+                actionName = model.getAction(Qt.MiddleButton, modifier, true)
+            } else if (mouse.button === Qt.RightButton) {
+                actionName = model.getAction(Qt.RightButton, modifier, true)
+            } else if (mouse.button === Qt.ForwardButton) {
+                actionName = model.getAction(Qt.ForwardButton, modifier, true)
+            } else if (mouse.button === Qt.BackButton) {
+                actionName = model.getAction(Qt.BackButton, modifier, true)
+            }
+
+            if (actionName) {
+                HarunaApp.actions[actionName].trigger()
+            }
+        }
+
+        function triggerWheelAction(wheel) : void {
+            const model = Models.mouseActionsModel
+            let actionName
+            let modifier = wheel.modifiers
+            if (wheel.angleDelta.y > 0) {
+                actionName = model.getAction(MouseActionsModel.ScrollUp, modifier)
+            } else if (wheel.angleDelta.y) {
+                actionName = model.getAction(MouseActionsModel.ScrollDown, modifier)
+            }
+
+            if (actionName) {
+                HarunaApp.actions[actionName].trigger()
+            }
+        }
+
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton | Qt.ForwardButton | Qt.BackButton
         anchors.fill: parent
         hoverEnabled: true
-        cursorShape: hideCursor && root.window.isFullScreen() ? Qt.BlankCursor : Qt.ArrowCursor
+        cursorShape: {
+            if (hideCursor && root.window.isFullScreen()) {
+                return Qt.BlankCursor
+            }
+            // While a button is held the cursor follows the gesture, not what is under it.
+            const overWaveform = pressed
+                    ? root.waveformPressed
+                    : waveformView.active
+            if (overWaveform) {
+                // A drag keeps the playhead under the pointer, but it seeks rather than resumes.
+                const resumes = root.pause && !root.waveformDragging && root.nearPlayhead(mouseX)
+                return resumes ? Qt.PointingHandCursor : Qt.SizeHorCursor
+            }
+            return Qt.ArrowCursor
+        }
 
         onPositionChanged: {
+            root.trackWaveformDoubleClickDistance(mouseX, mouseY)
+
+            // Dragging over the waveform seeks without touching the play state.
+            if (pressed) {
+                root.continueWaveformDrag(mouseX, mouseY)
+            }
+
             root.mousePositionChanged(mouseX, mouseY)
 
             hideCursor = false
             hideCursorTimer.restart()
 
-            if (!PlaylistSettings.canToggleWithMouse) {
+            // Scrubbing runs the pointer along the edges, which must not toggle the playlist.
+            if (!PlaylistSettings.canToggleWithMouse || root.waveformPressed) {
                 return
             }
             if (PlaylistSettings.position === "right") {
@@ -138,22 +360,36 @@ MpvItem {
         }
 
         onWheel: function(wheel) {
-            const model = Models.mouseActionsModel
-            let actionName
-            let modifier = wheel.modifiers
-            if (wheel.angleDelta.y > 0) {
-                actionName = model.getAction(MouseActionsModel.ScrollUp, modifier)
-            } else if (wheel.angleDelta.y) {
-                actionName = model.getAction(MouseActionsModel.ScrollDown, modifier)
-            }
-
-            if (actionName) {
-                HarunaApp.actions[actionName].trigger()
-            }
+            root.applyPendingWaveformClick()
+            triggerWheelAction(wheel)
         }
 
         onPressed: function(mouse) {
             focus = true
+
+            const onWaveform = mouse.button === Qt.LeftButton && waveformView.active
+
+            if (waveformClickTimer.running) {
+                // Qt makes a double click of a left press close enough in time and place to
+                // the pending click: its action, if any, replaces both clicks.
+                const doubleClickDistance = Qt.styleHints.mouseDoubleClickDistance
+                const completesDoubleClick = mouse.button === Qt.LeftButton
+                        && root.hasDoubleClickAction(mouse.modifiers)
+                        && Date.now() - root.waveformPressTime < Qt.styleHints.mouseDoubleClickInterval
+                        && Math.abs(mouse.x - root.waveformPressX) <= doubleClickDistance
+                        && Math.abs(mouse.y - root.waveformPressY) <= doubleClickDistance
+                if (!completesDoubleClick) {
+                    root.applyPendingWaveformClick()
+                } else if (!onWaveform) {
+                    return
+                }
+            }
+
+            if (onWaveform) {
+                root.beginWaveformPress(mouse.x, mouse.y)
+                return
+            }
+
             const model = Models.mouseActionsModel
             let actionName
             let modifier = mouse.modifiers
@@ -174,26 +410,29 @@ MpvItem {
             }
         }
 
+        onCanceled: root.cancelWaveformPress()
+
+        onReleased: function(mouse) {
+            if (!root.waveformPressed || mouse.button !== Qt.LeftButton) {
+                return
+            }
+            root.finishWaveformPress(mouse.x, mouse.modifiers)
+        }
+
+        onExited: {
+            // Off the player, for example over the footer, the next press cannot make a double
+            // click with a pending click.
+            root.applyPendingWaveformClick()
+        }
+
         onDoubleClicked: function(mouse) {
             focus = true
-            const model = Models.mouseActionsModel
-            let actionName
-            let modifier = mouse.modifiers
-            if (mouse.button === Qt.LeftButton) {
-                actionName = model.getAction(Qt.LeftButton, modifier, true)
-            } else if (mouse.button === Qt.MiddleButton) {
-                actionName = model.getAction(Qt.MiddleButton, modifier, true)
-            } else if (mouse.button === Qt.RightButton) {
-                actionName = model.getAction(Qt.RightButton, modifier, true)
-            } else if (mouse.button === Qt.ForwardButton) {
-                actionName = model.getAction(Qt.ForwardButton, modifier, true)
-            } else if (mouse.button === Qt.BackButton) {
-                actionName = model.getAction(Qt.BackButton, modifier, true)
+            // Without an action the second press finishes as a click of its own.
+            if (mouse.button === Qt.LeftButton && root.hasDoubleClickAction(mouse.modifiers)) {
+                // The second press belongs to the action and must not seek.
+                root.cancelWaveformPress()
             }
-
-            if (actionName) {
-                HarunaApp.actions[actionName].trigger()
-            }
+            triggerDoubleClickAction(mouse)
         }
     }
 
