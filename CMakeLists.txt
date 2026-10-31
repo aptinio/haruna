@@ -150,7 +150,7 @@ set_package_properties(KDSingleApplication-qt6 PROPERTIES TYPE REQUIRED
 find_package(FFmpeg)
 set_package_properties(FFmpeg PROPERTIES TYPE REQUIRED
     URL "https://ffmpeg.org"
-    DESCRIPTION "needed for playlist and mpris thumbnails")
+    DESCRIPTION "needed for playlist and mpris thumbnails, and the audio waveform")
 
 # -------------------------------
 # -- Ytdlp

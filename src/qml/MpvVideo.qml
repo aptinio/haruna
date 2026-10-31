@@ -53,6 +53,46 @@ MpvItem {
     onPlayNext: { HarunaApp.actions.playNextAction.trigger() }
     onPlayPrevious: { HarunaApp.actions.playPreviousAction.trigger() }
 
+    WaveformView {
+        id: waveformView
+
+        readonly property bool active: GeneralSettings.showAudioWaveform
+                                       && root.finishedLoading
+                                       && !root.hasVideoTrack
+                                       && root.hasAudioTrack
+                                       && root.isLocalFile
+                                       && root.duration > 0
+
+        anchors.fill: parent
+        visible: active
+        source: active ? root.currentUrl : ""
+        duration: root.duration
+        backgroundColor: Kirigami.Theme.backgroundColor
+        waveColorEvenChannel: Kirigami.Theme.highlightColor
+        waveColorOddChannel: Qt.lighter(Kirigami.Theme.highlightColor, 1.5)
+        centerLineColor: Qt.alpha(Kirigami.Theme.textColor, 0.3)
+
+        Rectangle {
+            id: playhead
+
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            x: root.duration > 0
+               ? Math.max(0, Math.min(parent.width - width, Math.round(root.position / root.duration * parent.width)))
+               : 0
+            color: Kirigami.Theme.textColor
+        }
+
+        Label {
+            anchors.centerIn: parent
+            visible: waveformView.loading
+            text: KI18n.i18nc("@info:status", "Generating waveform…")
+            opacity: 0.6
+            color: Kirigami.Theme.textColor
+        }
+    }
+
     Timer {
         id: hideCursorTimer
 

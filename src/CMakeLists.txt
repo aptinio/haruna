@@ -32,6 +32,7 @@ target_sources(haruna
     mpv/seekablerangesmodel.h mpv/seekablerangesmodel.cpp
     mprisitem.h mprisitem.cpp
     thumbnailimageprovider.h thumbnailimageprovider.cpp
+    waveformview.h waveformview.cpp
     worker.h worker.cpp
     ${ICONS_SRCS}
 )
@@ -92,6 +93,7 @@ add_subdirectory(playlist)
 add_subdirectory(transcript)
 add_subdirectory(utilities)
 add_subdirectory(settings)
+add_subdirectory(waveform)
 add_subdirectory(youtube)
 
 set_source_files_properties(qml/Models.qml
@@ -185,6 +187,7 @@ target_link_libraries(haruna PRIVATE
     Qt6::QuickControls2
     Qt6::ShaderTools
     Qt6::Sql
+    Qt6::Concurrent
 
     KF6::ColorScheme
     KF6::ConfigCore
@@ -205,6 +208,7 @@ target_link_libraries(haruna PRIVATE
 
     framedecoderplugin
     playlistplugin
+    waveform
     transcriptplugin
     utilitiesplugin
     settingsplugin

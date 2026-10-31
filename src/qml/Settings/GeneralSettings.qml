@@ -110,6 +110,26 @@ SettingsBasePage {
             Layout.fillWidth: true
         }
 
+        Item { Layout.preferredWidth: 1 }
+
+        RowLayout {
+            CheckBox {
+                text: KI18n.i18nc("@option:check", "Show audio waveform")
+                checked: GeneralSettings.showAudioWaveform
+                onClicked: {
+                    GeneralSettings.showAudioWaveform = checked
+                    GeneralSettings.save()
+                }
+            }
+
+            ToolTipButton {
+                toolTipText: KI18n.i18nc("@info:tooltip", "Draw the waveform of the audio in the player area for audio files. " +
+                                    "Generating the waveform takes a moment the first time a file is played.")
+
+                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+            }
+        }
+
         Label {
             text: KI18n.i18nc("@label:spinbox", "Footer style")
             Layout.alignment: Qt.AlignRight

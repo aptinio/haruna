@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 # vim: ts=2 sw=2
-# - Try to find the required ffmpeg components(default: AVFORMAT, AVUTIL, AVCODEC)
+# - Try to find the required ffmpeg components(default: AVFORMAT, AVUTIL, AVCODEC, SWRESAMPLE)
 #
 # Once done this will define
 #  FFMPEG_FOUND         - System has the all required components.
@@ -19,6 +19,7 @@
 #   - AVFORMAT
 #   - AVUTIL
 #   - POSTPROCESS
+#   - SWRESAMPLE
 #   - SWSCALE
 # the following variables will be defined
 #  <component>_FOUND        - System has <component>
@@ -34,7 +35,7 @@ include(FindPackageHandleStandardArgs)
 
 # The default components were taken from a survey over other FindFFMPEG.cmake files
 if (NOT FFmpeg_FIND_COMPONENTS)
-  set(FFmpeg_FIND_COMPONENTS AVCODEC AVFORMAT AVUTIL)
+  set(FFmpeg_FIND_COMPONENTS AVCODEC AVFORMAT AVUTIL SWRESAMPLE)
 endif ()
 
 #
@@ -96,6 +97,18 @@ macro(find_component _component _pkgconfig _library _header)
 endmacro()
 
 
+# Results cached before a required component was added do not include it, so search again.
+if (FFMPEG_LIBRARIES)
+  foreach (_component ${FFmpeg_FIND_COMPONENTS})
+    if (NOT ${_component}_LIBRARIES)
+      unset(FFMPEG_INCLUDE_DIRS CACHE)
+      unset(FFMPEG_LIBRARIES CACHE)
+      unset(FFMPEG_DEFINITIONS CACHE)
+      break ()
+    endif ()
+  endforeach ()
+endif ()
+
 # Check for cached results. If there are skip the costly part.
 if (NOT FFMPEG_LIBRARIES)
 
@@ -105,6 +118,7 @@ if (NOT FFMPEG_LIBRARIES)
   find_component(AVFORMAT libavformat avformat libavformat/avformat.h)
   find_component(AVDEVICE libavdevice avdevice libavdevice/avdevice.h)
   find_component(AVUTIL   libavutil   avutil   libavutil/avutil.h)
+  find_component(SWRESAMPLE libswresample swresample libswresample/swresample.h)
   find_component(SWSCALE  libswscale  swscale  libswscale/swscale.h)
   find_component(POSTPROC libpostproc postproc libpostproc/postprocess.h)
 
@@ -137,7 +151,7 @@ if (NOT FFMPEG_LIBRARIES)
 endif ()
 
 # Now set the noncached _FOUND vars for the components.
-foreach (_component AVCODEC AVDEVICE AVFORMAT AVUTIL POSTPROCESS SWSCALE)
+foreach (_component AVCODEC AVDEVICE AVFORMAT AVUTIL POSTPROCESS SWRESAMPLE SWSCALE)
   set_component_found(${_component})
 endforeach ()
 

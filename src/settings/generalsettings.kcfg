@@ -20,6 +20,9 @@
     <entry name="ShowChapterMarkers" type="bool">
       <default>true</default>
     </entry>
+    <entry name="ShowAudioWaveform" type="bool">
+      <default>true</default>
+    </entry>
     <entry name="ColorScheme" type="String"></entry>
     <entry name="GuiStyle" type="String">
         <default>Default</default>
