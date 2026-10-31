@@ -53,7 +53,9 @@ MpvItem {
     onPlayNext: { HarunaApp.actions.playNextAction.trigger() }
     onPlayPrevious: { HarunaApp.actions.playPreviousAction.trigger() }
 
-    readonly property bool waveformAvailable: waveformView.active
+    // A waveform strip over the bottom of the video. The audio-only waveform uses the whole
+    // surface instead, so at most one of the two is ever available for a file.
+    readonly property bool waveformAvailable: waveformView.active || videoWaveform.available
 
     // MpvItem throttles the reported position, so a seek reaches the playhead only after the
     // next report. Track the position here and move it on seek.
@@ -67,6 +69,25 @@ MpvItem {
     // A quarter of a grid unit, the small spacing scale, is a twitch rather than a drag.
     readonly property double waveformDragThreshold: Kirigami.Units.gridUnit / 4
 
+    // Height of the video waveform strip: a fraction of the player, kept usable when small.
+    readonly property int waveformStripHeight: Math.max(48, Math.min(120, Math.round(height * 0.15)))
+    readonly property bool waveformStripAvailable: videoWaveform.available
+    readonly property bool containsMouse: mouseArea.containsMouse
+
+    // Set by the window: while one of the player's menus is open the strip stays rather than
+    // hiding underneath it.
+    property bool menuOpen: false
+
+    // Set by the window: the footer can overlay the player, in fullscreen or as a floating
+    // footer. The strip then sits above it, follows its slide, and reveals and hides with it.
+    property bool bottomOverlayActive: false
+    property bool bottomOverlayShown: false
+    property real bottomOverlayHeight: 0
+
+    // Without an overlaying footer, the pointer reveals the strip and scrubbing holds it.
+    property bool waveformStripRevealedByPointer: false
+    readonly property bool waveformStripRevealed: bottomOverlayActive ? bottomOverlayShown : waveformStripRevealedByPointer
+
     property bool waveformPressed: false
     property bool waveformDragging: false
     property double waveformPressX: 0
@@ -78,6 +99,8 @@ MpvItem {
     property bool waveformPendingResumes: false
     property bool waveformDoubleClickPossible: false
 
+    onWaveformStripRevealedChanged: requestVideoWaveformPeaks()
+
     // A click is applied after the double click interval, so that a double click reaches its
     // configured action without first seeking and pausing.
     Timer {
@@ -88,6 +111,22 @@ MpvItem {
         interval: Qt.styleHints.mouseDoubleClickInterval > 0 ? Qt.styleHints.mouseDoubleClickInterval : 400
         repeat: false
         onTriggered: root.applyWaveformClick()
+    }
+
+    // Mirrors the footer: the pointer reveals the strip as it approaches the bottom edge, and
+    // leaving that band only schedules the hide, after the footer's delay, so that passing
+    // through it does not flicker.
+    Timer {
+        id: waveformStripHideTimer
+
+        interval: 2000
+        repeat: false
+        onTriggered: {
+            if (root.waveformStripHovered() || root.waveformPressed || root.menuOpen) {
+                return
+            }
+            root.waveformStripRevealedByPointer = false
+        }
     }
 
     Connections {
@@ -103,9 +142,51 @@ MpvItem {
 
         function onCurrentUrlChanged() {
             root.waveformPosition = 0
+            root.waveformStripRevealedByPointer = false
+            videoWaveform.peaksRequested = false
             // A gesture or a pending click belongs to the waveform of the previous file.
             waveformClickTimer.stop()
             root.cancelWaveformPress()
+        }
+
+        function onBottomOverlayActiveChanged() {
+            // Leaving fullscreen or the floating footer hands the strip back to the pointer.
+            // A reveal left over from the overlay must not show the strip with the pointer
+            // elsewhere, so it ends at once instead of after the delay.
+            if (!root.bottomOverlayActive
+                    && !(root.waveformStripHovered() || root.waveformPressed || root.menuOpen)) {
+                waveformStripHideTimer.stop()
+                root.waveformStripRevealedByPointer = false
+                return
+            }
+            root.updateWaveformStrip()
+        }
+
+        function onMenuOpenChanged() {
+            // The strip waited for the menu; once it is gone, the strip stays while the pointer
+            // is in the reveal band and otherwise hides after the usual delay.
+            if (!root.menuOpen) {
+                root.updateWaveformStrip()
+            }
+        }
+    }
+
+    Connections {
+        target: HarunaApp
+
+        function onQmlApplicationMouseLeave() {
+            root.scheduleWaveformStripHide()
+        }
+    }
+
+    Connections {
+        target: videoWaveform
+
+        function onAvailableChanged() {
+            // A new file finishing loading with the pointer still in the band, or with the
+            // footer shown, should show the strip without waiting for another pointer event.
+            root.updateWaveformStrip()
+            root.requestVideoWaveformPeaks()
         }
     }
 
@@ -119,6 +200,51 @@ MpvItem {
 
     function nearPlayhead(x: double) : bool {
         return Math.abs(x - root.waveformPlayheadX) <= root.waveformResumeTolerance
+    }
+
+    // True while the pointer is on the player in the band above the bottom edge that reveals
+    // the strip.
+    function waveformStripHovered() : bool {
+        return mouseArea.containsMouse && root.mouseY > root.height - root.waveformStripHeight * 2
+    }
+
+    // The strip only takes clicks inside its visible part, following the slide, and only while
+    // it is shown. It spans the whole width, so the pointer's height is enough.
+    function waveformStripContains(y: double) : bool {
+        return videoWaveform.available
+               && videoWaveformContent.y < videoWaveform.height
+               && y >= root.height - root.bottomOverlayHeight - root.waveformStripHeight + videoWaveformContent.y
+               && y <= root.height - root.bottomOverlayHeight
+    }
+
+    function updateWaveformStrip() : void {
+        if (!videoWaveform.available) {
+            waveformStripHideTimer.stop()
+            root.waveformStripRevealedByPointer = false
+            return
+        }
+        if (root.waveformStripHovered()) {
+            waveformStripHideTimer.stop()
+            root.waveformStripRevealedByPointer = true
+            return
+        }
+        // The pointer is no longer in the band: hide after the same delay as the footer.
+        root.scheduleWaveformStripHide()
+    }
+
+    // The delay counts from the moment the pointer left the band.
+    function scheduleWaveformStripHide() : void {
+        if (!waveformStripHideTimer.running) {
+            waveformStripHideTimer.start()
+        }
+    }
+
+    // Peaks are decoded when the strip is first shown, and kept while the file stays loaded:
+    // passing the pointer along the bottom must not decode the audio again.
+    function requestVideoWaveformPeaks() : void {
+        if (videoWaveform.available && root.waveformStripRevealed) {
+            videoWaveform.peaksRequested = true
+        }
     }
 
     function beginWaveformPress(x: double, y: double) : void {
@@ -318,7 +444,7 @@ MpvItem {
             // While a button is held the cursor follows the gesture, not what is under it.
             const overWaveform = pressed
                     ? root.waveformPressed
-                    : waveformView.active
+                    : waveformView.active || root.waveformStripContains(mouseY)
             if (overWaveform) {
                 // A drag keeps the playhead under the pointer, but it seeks rather than resumes.
                 const resumes = root.pause && !root.waveformDragging && root.nearPlayhead(mouseX)
@@ -336,6 +462,7 @@ MpvItem {
             }
 
             root.mousePositionChanged(mouseX, mouseY)
+            root.updateWaveformStrip()
 
             hideCursor = false
             hideCursorTimer.restart()
@@ -367,7 +494,8 @@ MpvItem {
         onPressed: function(mouse) {
             focus = true
 
-            const onWaveform = mouse.button === Qt.LeftButton && waveformView.active
+            const onWaveform = mouse.button === Qt.LeftButton
+                    && (waveformView.active || root.waveformStripContains(mouse.y))
 
             if (waveformClickTimer.running) {
                 // Qt makes a double click of a left press close enough in time and place to
@@ -410,29 +538,116 @@ MpvItem {
             }
         }
 
-        onCanceled: root.cancelWaveformPress()
+        onCanceled: {
+            root.cancelWaveformPress()
+            root.updateWaveformStrip()
+        }
 
         onReleased: function(mouse) {
             if (!root.waveformPressed || mouse.button !== Qt.LeftButton) {
                 return
             }
             root.finishWaveformPress(mouse.x, mouse.modifiers)
+            root.updateWaveformStrip()
         }
+
+        onEntered: root.updateWaveformStrip()
 
         onExited: {
             // Off the player, for example over the footer, the next press cannot make a double
             // click with a pending click.
             root.applyPendingWaveformClick()
+            root.updateWaveformStrip()
         }
 
         onDoubleClicked: function(mouse) {
             focus = true
             // Without an action the second press finishes as a click of its own.
             if (mouse.button === Qt.LeftButton && root.hasDoubleClickAction(mouse.modifiers)) {
-                // The second press belongs to the action and must not seek.
+                // The first click may have landed on the waveform even when this press did
+                // not, across the strip's edge, and must not seek after the action.
+                waveformClickTimer.stop()
+                // The second press belongs to the action: it neither seeks nor holds the
+                // footer and strip as a scrub does.
                 root.cancelWaveformPress()
             }
             triggerDoubleClickAction(mouse)
+        }
+    }
+
+    // The waveform of a video, laid over the bottom of the player. The video keeps its size:
+    // the strip slides in from the bottom edge and covers the lowest part of the picture, and
+    // rides above the footer while the footer overlays the player, in fullscreen or as a
+    // floating footer.
+    Item {
+        id: videoWaveform
+
+        readonly property bool available: GeneralSettings.showAudioWaveform
+                                         && root.finishedLoading
+                                         && root.hasVideoTrack
+                                         && root.hasAudioTrack
+                                         && root.isLocalFile
+                                         && root.duration > 0
+
+        property bool peaksRequested: false
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        y: root.height - root.bottomOverlayHeight - height
+        height: root.waveformStripHeight
+        clip: true
+        visible: available
+
+        Item {
+            id: videoWaveformContent
+
+            // 1 while hidden, 0 while shown. Animating the fraction instead of the position
+            // keeps the strip out of sight when the window is resized while it is hidden.
+            property double hiddenFraction: root.waveformStripRevealed ? 0 : 1
+
+            Behavior on hiddenFraction {
+                NumberAnimation {
+                    duration: Kirigami.Units.shortDuration
+                    easing.type: Easing.Linear
+                }
+            }
+
+            y: hiddenFraction * height
+            width: videoWaveform.width
+            height: videoWaveform.height
+
+            WaveformView {
+                id: videoWaveformView
+
+                anchors.fill: parent
+                visible: source.toString() !== ""
+                source: videoWaveform.available && videoWaveform.peaksRequested ? root.currentUrl : ""
+                duration: root.duration
+                separateChannels: false
+                backgroundColor: Qt.alpha(Kirigami.Theme.backgroundColor, 0.7)
+                waveColorEvenChannel: Kirigami.Theme.highlightColor
+                waveColorOddChannel: Qt.lighter(Kirigami.Theme.highlightColor, 1.5)
+                centerLineColor: Qt.alpha(Kirigami.Theme.textColor, 0.3)
+            }
+
+            Rectangle {
+                id: videoPlayhead
+
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 1
+                x: Math.max(0, Math.min(parent.width - width, Math.round(root.waveformPlayheadX)))
+                color: Kirigami.Theme.textColor
+            }
+
+            Label {
+                anchors.centerIn: parent
+                visible: videoWaveformView.loading
+                text: KI18n.i18nc("@info:status", "Generating waveform…")
+                opacity: 0.6
+                color: Kirigami.Theme.textColor
+                font: Kirigami.Theme.smallFont
+            }
         }
     }
 

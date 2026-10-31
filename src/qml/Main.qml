@@ -24,7 +24,6 @@ import org.kde.haruna.youtube
 ApplicationWindow {
     id: appWindow
 
-    property bool containsMouse: false
     property int previousVisibility: Window.Windowed
     property Kirigami.InlineMessage errorBox: null
     property var acceptedSubtitleTypes: ["application/x-subrip", "text/x-ssa", "text/x-microdvd"]
@@ -179,6 +178,10 @@ ApplicationWindow {
         id: mpv
 
         playlistsManager: playlist.manager
+        menuOpen: footerItem.menuOpen || mpvContextMenuLoader.active
+        bottomOverlayActive: appWindow.isFullScreen() || footerItem.isFloating
+        bottomOverlayShown: footerItem.footerState === "visible"
+        bottomOverlayHeight: mpv.bottomOverlayActive ? footerItem.overlayHeight : 0
 
         width: appWindow.contentItem.width
         height: appWindow.isFullScreen()
@@ -473,10 +476,6 @@ ApplicationWindow {
             if (PlaylistSettings.canToggleWithMouse && (appWindow.isFullScreen() || appWindow.isMaximized())) {
                 playlist.state = "hidden"
             }
-            appWindow.containsMouse = false
-        }
-        function onQmlApplicationMouseEnter() {
-            appWindow.containsMouse = true
         }
         function onOpenUrl(url) {
             if (GeneralSettings.appendVideoToSingleInstance) {

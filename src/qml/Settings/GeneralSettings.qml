@@ -123,7 +123,8 @@ SettingsBasePage {
             }
 
             ToolTipButton {
-                toolTipText: KI18n.i18nc("@info:tooltip", "Draw the waveform of the audio in the player area for audio files. " +
+                toolTipText: KI18n.i18nc("@info:tooltip", "Draw the waveform of the audio in the player area for audio files, " +
+                                    "and in a strip over the bottom of the video for videos. " +
                                     "Generating the waveform takes a moment the first time a file is played.")
 
                 Layout.preferredHeight: Kirigami.Units.iconSizes.medium

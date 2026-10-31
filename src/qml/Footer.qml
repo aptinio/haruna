@@ -31,6 +31,14 @@ Item {
     property bool isFloating: GeneralSettings.footerStyle === "floating"
     property bool isSmallSize: width < 600
     property int buttonSize: isSmallSize ? Kirigami.Units.iconSizes.small : Kirigami.Units.iconSizes.smallMedium
+    readonly property bool menuOpen: hamburgerMenu.isOpen || root.progressBar.chaptersPopupIsOpen
+    // Height of the footer over the bottom of the window, including its slide in and out.
+    readonly property real overlayHeight: footer.visible ? root.height - footer.y : 0
+    // The video waveform strip sits above the footer's root area, so the taller of the two also
+    // decides when the footer appears, and both leave at the same pointer distance.
+    readonly property real revealHeight: root.m_mpv.waveformStripAvailable
+                                         ? Math.max(root.height, root.m_mpv.waveformStripHeight)
+                                         : footer.height
 
     implicitWidth: Window.window.contentItem.width
     implicitHeight: root.isFloating
@@ -68,6 +76,34 @@ Item {
             function onMousePositionChanged(x, y) {
                 Qt.callLater(footer.setState)
             }
+
+            function onWaveformPressedChanged() {
+                // A scrub that ends without another pointer move still has to reevaluate the
+                // footer, or a floating footer can be left open.
+                Qt.callLater(footer.setState)
+            }
+
+            function onMenuOpenChanged() {
+                // The footer waits for an open menu; reevaluate once it closes.
+                Qt.callLater(footer.setState)
+            }
+        }
+
+        Connections {
+            target: root.Window.window
+            function onVisibilityChanged() {
+                // Entering fullscreen with the pointer away from the bottom hides the footer
+                // at once instead of flashing for the whole delay.
+                const mainWindow = root.Window.window as Main
+                const inBand = root.m_mpv.containsMouse
+                               && root.m_mpv.mouseY > root.m_mpv.height - root.revealHeight * 2
+                // Whatever holds the footer against the hide delay holds it here too.
+                const held = footer.hovered || root.m_mpv.menuOpen || root.m_mpv.waveformPressed
+                if (mainWindow.isFullScreen() && !inBand && !held) {
+                    hideFooterTimer.stop()
+                    root.footerState = "hidden"
+                }
+            }
         }
 
         Timer {
@@ -84,9 +120,15 @@ Item {
 
             running: false
             repeat: false
-            interval: 1000
+            interval: 2000
             onTriggered: {
-                if (footer.hovered || hamburgerMenu.isOpen || progressBar.chaptersPopupIsOpen) {
+                if (footer.hovered || root.m_mpv.menuOpen || root.m_mpv.waveformPressed) {
+                    return
+                }
+                // Started in fullscreen, it can run out after leaving it, where the docked
+                // footer stays.
+                const mainWindow = root.Window.window as Main
+                if (!root.isFloating && !mainWindow.isFullScreen()) {
                     return
                 }
 
@@ -306,13 +348,12 @@ Item {
             if (GeneralSettings.floatingFooterTrigger === "EveryMouseMovement") {
                 hideFooterTimer.stop()
                 root.footerState = "visible"
-                if (root.m_mpv.mouseY < root.m_mpv.height - footer.height * 2) {
+                if (root.m_mpv.mouseY < root.m_mpv.height - root.revealHeight * 2) {
                     hideFooterTimer.restart()
                 }
             } else {
-                if (root.m_mpv.mouseY > root.m_mpv.height - footer.height * 2) {
-                    const mainWindow = root.Window.window as Main
-                    if (mainWindow.containsMouse) {
+                if (root.m_mpv.mouseY > root.m_mpv.height - root.revealHeight * 2) {
+                    if (root.m_mpv.containsMouse) {
                         hideFooterTimer.stop()
                         root.footerState = "visible"
                     }
@@ -324,10 +365,15 @@ Item {
 
         function staticState() {
             const mainWindow = Window.window as Main
-            if (!mainWindow.isFullScreen() || (root.m_mpv.mouseY > root.m_mpv.height - footer.height * 2 && mainWindow.containsMouse)) {
+            if (!mainWindow.isFullScreen()
+                    || (root.m_mpv.mouseY > root.m_mpv.height - root.revealHeight * 2
+                        && root.m_mpv.containsMouse)) {
+                hideFooterTimer.stop()
                 root.footerState = "visible"
-            } else {
-                root.footerState = "hidden"
+                return
+            }
+            if (root.footerState === "visible" && !hideFooterTimer.running) {
+                hideFooterTimer.start()
             }
         }
 
