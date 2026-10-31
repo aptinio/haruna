@@ -52,6 +52,7 @@ MpvItem::MpvItem(QQuickItem *parent)
     , m_chaptersModel{std::make_unique<ChaptersModel>()}
     , m_saveTimePositionTimer{std::make_unique<QTimer>()}
     , m_seekableRangesModel{std::make_unique<SeekableRangesModel>()}
+    , m_positionReportTimer{std::make_unique<QTimer>()}
 {
     observeProperty(MpvProperties::self()->MediaTitle, MPV_FORMAT_STRING);
     observeProperty(MpvProperties::self()->Position, MPV_FORMAT_DOUBLE);
@@ -134,6 +135,8 @@ MpvItem::MpvItem(QQuickItem *parent)
         }
     }
     m_positionChangeTimer.start();
+    m_positionReportTimer->setSingleShot(true);
+    connect(m_positionReportTimer.get(), &QTimer::timeout, this, &MpvItem::reportPosition);
 }
 
 MpvItem::~MpvItem() = default;
@@ -231,6 +234,8 @@ void MpvItem::setupConnections()
 
     connect(this, &MpvItem::currentUrlChanged, this, [this]() {
         setFinishedLoading(false);
+        // A position held back by the throttle belongs to the previous file.
+        m_positionReportTimer->stop();
     });
 
     connect(mpvController(), &MpvController::fileLoaded,
@@ -384,13 +389,14 @@ void MpvItem::onPropertyChanged(const QString &property, const QVariant &value)
         Q_EMIT mediaTitleChanged();
 
     } else if (property == MpvProperties::self()->Position) {
-        if (m_positionChangeTimer.elapsed() >= 200) {
-            m_positionChangeTimer.restart();
-
-            m_position = value.toDouble();
-            m_formattedPosition = MiscUtils::formatTime(m_position);
-            updateTaskbarPlaybackProgress();
-            Q_EMIT positionChanged();
+        m_reportedPosition = value.toDouble();
+        const auto elapsed = m_positionChangeTimer.elapsed();
+        if (elapsed >= 200) {
+            reportPosition();
+        } else if (!m_positionReportTimer->isActive()) {
+            // A position held back by the throttle is reported once it ends, so that the
+            // last one of a quick run of seeks, after which mpv is quiet, is not lost.
+            m_positionReportTimer->start(static_cast<int>(200 - elapsed));
         }
 
     } else if (property == MpvProperties::self()->Remaining) {
@@ -700,6 +706,17 @@ void MpvItem::onChapterChanged()
             return;
         }
     }
+}
+
+void MpvItem::reportPosition()
+{
+    m_positionReportTimer->stop();
+    m_positionChangeTimer.restart();
+
+    m_position = m_reportedPosition;
+    m_formattedPosition = MiscUtils::formatTime(m_position);
+    updateTaskbarPlaybackProgress();
+    Q_EMIT positionChanged();
 }
 
 void MpvItem::updateTaskbarPlaybackProgress()

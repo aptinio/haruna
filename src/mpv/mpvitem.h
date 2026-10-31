@@ -239,6 +239,7 @@ private:
     void onEndOfFileReached();
     MpvItem::EndOfFileAction endOfFileAction() const;
     void onPropertyChanged(const QString &property, const QVariant &value);
+    void reportPosition();
     void saveTimePosition();
     double loadTimePosition();
     void resetTimePosition();
@@ -253,6 +254,7 @@ private:
     double m_watchPercentage{0.0};
 
     double m_position{0.0};
+    double m_reportedPosition{0.0};
     QString m_formattedPosition;
     double m_remaining{0.0};
     QString m_formattedRemaining;
@@ -283,6 +285,7 @@ private:
     bool m_isVideo;
     std::unique_ptr<SeekableRangesModel> m_seekableRangesModel;
     QElapsedTimer m_positionChangeTimer;
+    std::unique_ptr<QTimer> m_positionReportTimer;
 };
 
 #endif // MPVOBJECT_H
